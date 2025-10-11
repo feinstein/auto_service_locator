@@ -1,0 +1,14 @@
+name: auto_service_locator
+description: A Service Locator that can automatically satisfy dependencies.
+version: 0.0.1
+# repository: https://github.com/my_org/my_repo
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  meta: ^1.17.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.6
