@@ -3,10 +3,6 @@ import 'dart:async';
 import 'package:meta/meta.dart';
 
 class AutoServiceLocator {
-  AutoServiceLocator._();
-
-  static final AutoServiceLocator instance = AutoServiceLocator._();
-
   // TODO: Test null being registered
   @visibleForTesting
   Map<Type, ServiceEntry> servicesMap = {};
@@ -18,23 +14,19 @@ class AutoServiceLocator {
   final List<Type> resolutionStack = [];
 
   void registerSingleton<T>(Factory<T> singletonFactory) {
-    if (servicesMap.containsKey(T)) {
-      throw ServiceLocatorRegistrationError(
-        'Type $T is already registered. Unregister it before you try to register this type again.',
-      );
-    }
-
-    servicesMap[T] = ServiceEntry(factory: singletonFactory, isSingleton: true);
+    _register(singletonFactory, isSingleton: true);
   }
 
   void registerFactory<T>(Factory<T> factory) {
+    _register(factory, isSingleton: false);
+  }
+
+  void _register<T>(Factory<T> factory, {required bool isSingleton}) {
     if (servicesMap.containsKey(T)) {
-      throw ServiceLocatorRegistrationError(
-        'Type $T is already registered. Unregister it before you try to register this type again.',
-      );
+      throw ServiceLocatorTypeAlreadyRegisteredError(T);
     }
 
-    servicesMap[T] = ServiceEntry(factory: factory, isSingleton: false);
+    servicesMap[T] = ServiceEntry(factory: factory, isSingleton: isSingleton);
   }
 
   void unregister<T>() => servicesMap.remove(T);
@@ -42,9 +34,7 @@ class AutoServiceLocator {
   Future<T> get<T>() async {
     final service = servicesMap[T];
     if (service == null) {
-      throw ServiceLocatorGetterError(
-        'The type $T was not registered. You need to register the type before you can use it.',
-      );
+      throw ServiceLocatorTypeNotFoundError(T);
     }
 
     if (service.instance != null) {
@@ -55,7 +45,7 @@ class AutoServiceLocator {
     // Check for circular dependency (same call chain)
     if (resolutionStack.contains(T)) {
       final chain = [...resolutionStack, T];
-      throw ServiceLocatorGetterError('Circular dependency detected: $chain');
+      throw ServiceLocatorCircularDependencyError(chain);
     }
 
     // Wait for this instance, as it is already being initialised elsewhere
@@ -69,9 +59,10 @@ class AutoServiceLocator {
     pendingInitialisations[T] = completer;
 
     try {
-      final serviceInstance = service.factory is Future
-          ? await service.factory(get)
-          : service.factory(get);
+      final factoryResult = service.factory(get);
+      final serviceInstance = factoryResult is Future<T>
+          ? await factoryResult
+          : factoryResult as T;
 
       if (service.isSingleton) {
         // Add the missing singleton instance cache
@@ -93,10 +84,17 @@ class AutoServiceLocator {
       pendingInitialisations.remove(T);
     }
   }
+
+  @visibleForTesting
+  void reset() {
+    servicesMap.clear();
+    pendingInitialisations.clear();
+    resolutionStack.clear();
+  }
 }
 
 typedef Factory<TRegister> =
-    TRegister Function(FutureOr<TWanted> Function<TWanted>() get);
+    FutureOr<TRegister> Function(FutureOr<TWanted> Function<TWanted>() get);
 
 @visibleForTesting
 class ServiceEntry<T> {
@@ -111,29 +109,25 @@ class ServiceEntry<T> {
   final T? instance;
 }
 
-class ServiceLocatorRegistrationError extends Error {
-  ServiceLocatorRegistrationError([this.message, this.type]);
+class ServiceLocatorTypeAlreadyRegisteredError extends Error {
+  ServiceLocatorTypeAlreadyRegisteredError(this.type);
 
-  final String? message;
-  final Type? type;
+  final Type type;
 
   @override
   String toString() {
-    return message ??
-        'Error while trying to register the type ${type != null ? '$type' : ''}';
+    return 'Type $type is already registered. Unregister it before you try to register this type again.';
   }
 }
 
-class ServiceLocatorGetterError extends Error {
-  ServiceLocatorGetterError([this.message, this.type]);
+class ServiceLocatorTypeNotFoundError extends Error {
+  ServiceLocatorTypeNotFoundError(this.type);
 
-  final String? message;
-  final Type? type;
+  final Type type;
 
   @override
   String toString() {
-    return message ??
-        'Error while trying to get type ${type != null ? '$type' : ''}';
+    return 'The type $type was not registered. You need to register the type before you can use it.';
   }
 }
 
