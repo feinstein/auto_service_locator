@@ -5,11 +5,14 @@ void main() async {
   final locator = AutoServiceLocator();
   locator.registerSingleton((get) => A(1));
   locator.registerSingleton((get) async => B(await get(), await createCAsync()));
+  locator.registerSingleton((get) async => B(await get(), await createCAsync()), withKey: '2ndB');
 
   final b = await locator.get<B>();
+  final b2 = await locator.get<B>(withKey: '2ndB');
   final a = await locator.get<A>();
 
   print(b is B);
+  print(b2 is B);
   print(a is A);
 }
 
