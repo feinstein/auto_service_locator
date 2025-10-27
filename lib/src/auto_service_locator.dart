@@ -3,12 +3,12 @@ import 'dart:async';
 import 'package:meta/meta.dart';
 
 class AutoServiceLocator {
-  // TODO: Test null being registered
+  // TODO(mfeinstein): Test null being registered
   @visibleForTesting
-  Map<(Type, String?), ServiceEntry> servicesMap = {};
+  Map<(Type, String?), ServiceEntry<dynamic>> servicesMap = {};
 
   @visibleForTesting
-  Map<(Type, String?), Completer> pendingInitializations = {};
+  Map<(Type, String?), Completer<dynamic>> pendingInitializations = {};
 
   @visibleForTesting
   final List<(Type, String?)> resolutionStack = [];
@@ -26,19 +26,12 @@ class AutoServiceLocator {
     _register(factory, isSingleton: false, withKey: withKey);
   }
 
-  void _register<T>(
-    Factory<T> factory, {
-    required bool isSingleton,
-    String? withKey,
-  }) {
+  void _register<T>(Factory<T> factory, {required bool isSingleton, String? withKey}) {
     if (!allowReassignment && servicesMap.containsKey((T, withKey))) {
       throw ServiceLocatorTypeAlreadyRegisteredError(T, withKey);
     }
 
-    servicesMap[(T, withKey)] = ServiceEntry(
-      factory: factory,
-      isSingleton: isSingleton,
-    );
+    servicesMap[(T, withKey)] = ServiceEntry(factory: factory, isSingleton: isSingleton);
 
     // If there were any pending initializations for this type or key, we abort
     // it with an exception.
@@ -80,7 +73,7 @@ class AutoServiceLocator {
       throw ServiceLocatorTypeNotRegisteredError(instance.runtimeType, null);
     }
 
-    for (var entry in entriesToRemove) {
+    for (final entry in entriesToRemove) {
       servicesMap.remove(entry.key);
       // If there were any pending initializations for this type or key, we abort
       // it with an exception.
@@ -89,7 +82,9 @@ class AutoServiceLocator {
   }
 
   Future<T> get<T>({String? withKey}) async {
+    // Due to Dart's generics limitations, we can only get a ServiceEntry<dynamic> and not ServiceEntry<T>
     final service = servicesMap[(T, withKey)];
+
     if (service == null) {
       throw ServiceLocatorTypeOrKeyNotFoundError(T, withKey);
     }
@@ -174,11 +169,7 @@ typedef Factory<TRegister> =
 
 @visibleForTesting
 class ServiceEntry<T> {
-  ServiceEntry({
-    required this.factory,
-    required this.isSingleton,
-    this.instance,
-  });
+  ServiceEntry({required this.factory, required this.isSingleton, this.instance});
 
   final Factory<T> factory;
   final bool isSingleton;

@@ -5,14 +5,23 @@ void main() async {
   final locator = AutoServiceLocator();
   locator.registerSingleton((get) => A(1));
   locator.registerSingleton((get) async => B(await get(), await createCAsync()));
-  locator.registerSingleton((get) async => B(await get(), await createCAsync()), withKey: '2ndB');
+  locator.registerSingleton(
+    (get) async => B(await get(), await createCAsync()),
+    withKey: '2ndB',
+  );
+  // TODO(mfeinstein): [13/10/2025] Add exception for registering dynamic?
+  locator.registerSingleton((get) async => get<B>(withKey: '2ndB'), withKey: '3rdB');
 
+  // final s = await locator.get<String>();
   final b = await locator.get<B>();
   final b2 = await locator.get<B>(withKey: '2ndB');
+  final b3 = await locator.get<B>(withKey: '3rdB');
   final a = await locator.get<A>();
 
   print(b is B);
   print(b2 is B);
+  print(b3 is B);
+  print(identical(b2, b3));
   print(a is A);
 }
 
@@ -34,6 +43,6 @@ class C {
 }
 
 Future<C> createCAsync() async {
-  Future.delayed(Duration(microseconds: 10));
+  await Future<void>.delayed(const Duration(microseconds: 10));
   return C();
 }
