@@ -1,9 +1,12 @@
 import 'dart:async';
 
 import 'package:auto_service_locator/auto_service_locator.dart';
+import 'package:logging/logging.dart';
 import 'package:meta/meta.dart';
 
 class AutoServiceLocator {
+  static final _logger = Logger('AutoServiceLocator');
+
   // TODO(mfeinstein): Test null being registered
   @visibleForTesting
   Map<(Type, String?), ServiceEntry<dynamic>> servicesMap = {};
@@ -22,7 +25,14 @@ class AutoServiceLocator {
   /// Be aware that if there are any pending initializations for a type that is being
   /// registered again, the pending initialization will complete with an error.
   @visibleForTesting
-  bool allowReassignment = false;
+  bool isReassignmentAllowed = false;
+
+  /// Enables logging.
+  ///
+  /// Logging will be done using the `logging` package with the `FINE` log level.
+  /// This can be useful for investigating bugs in dependency initialisations, but most of
+  /// the time will just add unnecessary logs, thus logging is off by default.
+  bool shouldLog = false;
 
   /// Registers a Singleton of type [T], that will be lazily created once by
   /// [singletonFactory], when first requested by [get].
@@ -49,7 +59,7 @@ class AutoServiceLocator {
   ///
   /// If you need to reassign an instance, try to [unregister] it first. If you are
   /// running tests and needs constant reassignments, consider enabling
-  /// [allowReassignment]. This option is not allowed by default, since most of the times
+  /// [isReassignmentAllowed]. This option is not allowed by default, since most of the times
   /// reassignments are unintentional and a source of hard to track bugs.
   ///
   /// If you need to register multiple factories for the same type, you can use
@@ -57,14 +67,15 @@ class AutoServiceLocator {
   /// If a type is registered with a key, then multiple factories for the same
   /// type [T] can be used, and the key is what will make them unique.
   ///
-  /// If [allowReassignment] is `true` and there are pending async initializations for
+  /// If [isReassignmentAllowed] is `true` and there are pending async initializations for
   /// this type or key, the initialization will be aborted with an
   /// [ServiceLocatorRegistrationOverrideException].
   ///
   /// Throws [ServiceLocatorTypeAlreadyRegisteredError] if the type or key is already
-  /// registered and [allowReassignment] is `false`.
+  /// registered and [isReassignmentAllowed] is `false`.
   /// {@endtemplate}
   void registerSingleton<T>(Factory<T> singletonFactory, {String? withKey}) {
+    maybeLog('Registering Singleton for type $T with key $withKey');
     _register(singletonFactory, isSingleton: true, withKey: withKey);
   }
 
@@ -90,16 +101,21 @@ class AutoServiceLocator {
   ///
   /// {@macro register}
   void registerFactory<T>(Factory<T> factory, {String? withKey}) {
+    maybeLog('Registering Factory for type $T with key $withKey');
     _register(factory, isSingleton: false, withKey: withKey);
   }
 
   void _register<T>(Factory<T> factory, {required bool isSingleton, String? withKey}) {
-    if (!allowReassignment && servicesMap.containsKey((T, withKey))) {
+    if (!isReassignmentAllowed && servicesMap.containsKey((T, withKey))) {
+      maybeLog(
+        'Type $T with key $withKey is already registered and reassignment is not allowed',
+      );
       throw ServiceLocatorTypeAlreadyRegisteredError(T, withKey);
     }
 
     if (withKey != null) {
       if (keys.contains(withKey)) {
+        maybeLog('Key $withKey is not unique');
         throw ServiceLocatorKeyAlreadyRegisteredError(withKey);
       }
 
@@ -116,6 +132,9 @@ class AutoServiceLocator {
   void _abortPendingInitializationsFor(Type type, String? key) {
     final pendingInitialization = pendingInitializations[(type, key)];
     if (pendingInitialization != null) {
+      maybeLog(
+        'Pending initialization detected for type $type with key $key. Aborting the previous initialization.',
+      );
       pendingInitializations.remove((type, key));
       pendingInitialization.completeError(
         ServiceLocatorRegistrationOverrideException(type, key),
@@ -125,6 +144,7 @@ class AutoServiceLocator {
 
   /// Unregisters a given type [T] with an optional [key].
   void unregister<T>({String? key}) {
+    maybeLog('Unregistering Type $T with key $key');
     final removedEntry = servicesMap.remove((T, key));
 
     // If there were any pending initializations for this type or key, we abort
@@ -132,6 +152,7 @@ class AutoServiceLocator {
     _abortPendingInitializationsFor(T, key);
 
     if (removedEntry == null) {
+      maybeLog('No entries were found to be unregistered ');
       throw ServiceLocatorUnregisterTypeNotRegisteredError(T, key);
     }
 
@@ -144,11 +165,13 @@ class AutoServiceLocator {
   /// If you have registered a large quantity of items, this might not have good
   /// performance, as it will do a linear search for that instance.
   void unregisterInstance(Object? instance) {
+    maybeLog('Unregistering instances of type ${instance.runtimeType}.');
     final entriesToRemove = servicesMap.entries.where((mapEntry) {
       return identical(mapEntry.value.instance, instance);
     });
 
     if (entriesToRemove.isEmpty) {
+      maybeLog('No entries were found to be unregistered ');
       throw ServiceLocatorUnregisterTypeNotRegisteredError(instance.runtimeType, null);
     }
 
@@ -178,10 +201,13 @@ class AutoServiceLocator {
   /// Throws [ServiceLocatorTypeOrKeyNotFoundError] if the type or key were not found.
   /// Throws [ServiceLocatorCircularDependencyError] if a circular dependency was detected.
   Future<T> get<T>({String? withKey}) async {
+    maybeLog('Getting instance of Type $T with key $withKey');
+
     // Due to Dart's generics limitations, we can only get a ServiceEntry<dynamic> and not ServiceEntry<T>
     final service = servicesMap[(T, withKey)];
 
     if (service == null) {
+      maybeLog('No registered entry was found.');
       throw ServiceLocatorTypeOrKeyNotFoundError(T, withKey);
     }
 
@@ -192,6 +218,7 @@ class AutoServiceLocator {
 
     // Check for circular dependency (same call chain)
     if (resolutionStack.contains((T, withKey))) {
+      maybeLog('Circular dependency detected');
       final chain = [...resolutionStack, (T, withKey)];
       throw ServiceLocatorCircularDependencyError(chain, withKey);
     }
@@ -199,6 +226,7 @@ class AutoServiceLocator {
     // Wait for this instance, as it is already being initialized elsewhere
     final pendingInitialization = pendingInitializations[(T, withKey)];
     if (pendingInitialization != null) {
+      maybeLog('Pending initialization detected. Waiting for it to finish.');
       return await pendingInitialization.future as T;
     }
 
@@ -221,6 +249,7 @@ class AutoServiceLocator {
         );
       }
 
+      maybeLog('Completing initialization of type $T with key $withKey');
       completer.complete(serviceInstance);
 
       return serviceInstance;
@@ -238,6 +267,7 @@ class AutoServiceLocator {
   /// filter if the type was registered with that key, and a specific [instance]
   /// to check if that instance was registered for the Type and Key.
   bool isRegistered<T>({String? withKey, Object? instance}) {
+    maybeLog('Checking if type $T with key $withKey is registered');
     final service = servicesMap[(T, withKey)];
     if (service == null) {
       return false;
@@ -258,16 +288,26 @@ class AutoServiceLocator {
   ///
   /// Throws if any pending initialisation fails.
   Future<void> waitPendingInitializations() async {
+    maybeLog('Waiting for any pending initializations');
     await Future.wait(pendingInitializations.entries.map((entry) => entry.value.future));
   }
 
   /// Resets the locator's internal caches. This should only be used for testing purposes.
   @visibleForTesting
   void reset() {
+    maybeLog('Resetting internal state');
     servicesMap.clear();
     pendingInitializations.clear();
     resolutionStack.clear();
     keys.clear();
+  }
+
+  /// Only logs if logs are allowed with [shouldLog].
+  @visibleForTesting
+  void maybeLog(String message) {
+    if (shouldLog) {
+      _logger.fine(message);
+    }
   }
 }
 
