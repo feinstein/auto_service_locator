@@ -7,6 +7,8 @@ class AutoServiceLocator {
   @visibleForTesting
   Map<(Type, String?), ServiceEntry<dynamic>> servicesMap = {};
 
+  Set<String> keys = {};
+
   @visibleForTesting
   Map<(Type, String?), Completer<dynamic>> pendingInitializations = {};
 
@@ -95,6 +97,14 @@ class AutoServiceLocator {
       throw ServiceLocatorTypeAlreadyRegisteredError(T, withKey);
     }
 
+    if (withKey != null) {
+      if (keys.contains(withKey)) {
+        throw ServiceLocatorKeyAlreadyRegisteredError(withKey);
+      }
+
+      keys.add(withKey);
+    }
+
     servicesMap[(T, withKey)] = ServiceEntry(factory: factory, isSingleton: isSingleton);
 
     // If there were any pending initializations for this type or key, we abort
@@ -123,6 +133,8 @@ class AutoServiceLocator {
     if (removedEntry == null) {
       throw ServiceLocatorUnregisterTypeNotRegisteredError(T, key);
     }
+
+    keys.remove(key);
   }
 
   /// Unregisters a specific instance. If this same instance was registered multiple
@@ -141,6 +153,11 @@ class AutoServiceLocator {
 
     for (final entry in entriesToRemove) {
       servicesMap.remove(entry.key);
+      final stringKey = entry.key.$2;
+      if (stringKey != null) {
+        keys.remove(stringKey);
+      }
+
       // If there were any pending initializations for this type or key, we abort
       // it with an exception.
       _abortPendingInitializationsFor(entry.key.$1, entry.key.$2);
@@ -249,6 +266,7 @@ class AutoServiceLocator {
     servicesMap.clear();
     pendingInitializations.clear();
     resolutionStack.clear();
+    keys.clear();
   }
 }
 
@@ -274,7 +292,18 @@ class ServiceLocatorTypeAlreadyRegisteredError extends Error {
 
   @override
   String toString() {
-    return '${key != null ? 'The Key $key with ' : ''}Type $type is already registered. Unregister it before you try to register this type again.';
+    return '${key != null ? 'The Key $key with ' : ''}Type $type is already registered. Unregister it before trying to register this type again.';
+  }
+}
+
+class ServiceLocatorKeyAlreadyRegisteredError extends Error {
+  ServiceLocatorKeyAlreadyRegisteredError(this.key);
+
+  final String? key;
+
+  @override
+  String toString() {
+    return 'The Key $key is already registered. Unregister it before trying to register it again.';
   }
 }
 
