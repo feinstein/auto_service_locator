@@ -1,7 +1,11 @@
 name: auto_service_locator
 description: A Service Locator that can automatically satisfy dependencies.
 version: 0.0.1
-# repository: https://github.com/my_org/my_repo
+repository: https://github.com/feinstein/auto_service_locator
+issue_tracker: https://github.com/feinstein/auto_service_locator/issues
+topics:
+  - service-locator
+  - dependency-injection
 
 environment:
   sdk: ^3.9.2

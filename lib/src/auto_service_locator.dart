@@ -15,13 +15,77 @@ class AutoServiceLocator {
 
   /// During tests it is normal to reassign types with different implementations
   /// multiple times. In case you need this, set this to `true`.
+  ///
+  /// Be aware that if there are any pending initializations for a type that is being
+  /// registered again, the pending initialization will complete with an error.
   @visibleForTesting
   bool allowReassignment = false;
 
+  /// Registers a Singleton of type [T], that will be lazily created once by
+  /// [singletonFactory], when first requested by [get].
+  ///
+  /// When registering a type, the [singletonFactory] will be provided with an instance of
+  /// [get], this allows you to easily retrieve async dependencies that your factory may
+  /// need to register the new type. This can be seen in the examples below:
+  ///
+  /// ```dart
+  /// class Orange {
+  ///   Orange(Water water, Soil soil);
+  ///   ...
+  /// }
+  ///
+  /// Future<Soil> slowAsyncCreateSoil() async {...}
+  ///
+  /// locator.registerSingleton((get) async => Orange(await get(), await get()));
+  /// locator.registerSingleton((_) => Water());
+  /// locator.registerSingleton((_) => slowAsyncCreateSoil());
+  /// ```
+  /// {@template register}
+  /// Only one instance of type [T] can be registered at a given time, unless keys are
+  /// being used (more on this later).
+  ///
+  /// If you need to reassign an instance, try to [unregister] it first. If you are
+  /// running tests and needs constant reassignments, consider enabling
+  /// [allowReassignment]. This option is not allowed by default, since most of the times
+  /// reassignments are unintentional and a source of hard to track bugs.
+  ///
+  /// If you need to register multiple factories for the same type, you can use
+  /// [withKey]. Keys are optional but must be unique.
+  /// If a type is registered with a key, then multiple factories for the same
+  /// type [T] can be used, and the key is what will make them unique.
+  ///
+  /// If [allowReassignment] is `true` and there are pending async initializations for
+  /// this type or key, the initialization will be aborted with an
+  /// [ServiceLocatorRegistrationOverrideException].
+  ///
+  /// Throws [ServiceLocatorTypeAlreadyRegisteredError] if the type or key is already
+  /// registered and [allowReassignment] is `false`.
+  /// {@endtemplate}
   void registerSingleton<T>(Factory<T> singletonFactory, {String? withKey}) {
     _register(singletonFactory, isSingleton: true, withKey: withKey);
   }
 
+  /// Registers a [factory] that lazily creates new instances of type [T], when requested
+  /// by [get].
+  ///
+  ///  When registering a type, the [factory] will be provided with an instance of [get],
+  ///  this allows you to easily retrieve async dependencies that your factory may need to
+  ///  register the new type. This can be seen in the examples below:
+  ///
+  ///  ```dart
+  ///  class Orange {
+  ///   Orange(Water water, Soil soil);
+  ///    ...
+  ///  }
+  ///
+  ///  Future<Soil> slowAsyncCreateSoil() async {...}
+  ///
+  ///  locator.registerFactory((get) async => Orange(await get(), await get()));
+  ///  locator.registerFactory((_) => Water());
+  ///  locator.registerFactory((_) => slowAsyncCreateSoil());
+  ///  ```
+  ///
+  /// {@macro register}
   void registerFactory<T>(Factory<T> factory, {String? withKey}) {
     _register(factory, isSingleton: false, withKey: withKey);
   }
@@ -48,6 +112,7 @@ class AutoServiceLocator {
     }
   }
 
+  /// Unregisters a given type [T] with an optional [key].
   void unregister<T>({String? key}) {
     final removedEntry = servicesMap.remove((T, key));
 
@@ -56,11 +121,12 @@ class AutoServiceLocator {
     _abortPendingInitializationsFor(T, key);
 
     if (removedEntry == null) {
-      throw ServiceLocatorTypeNotRegisteredError(T, key);
+      throw ServiceLocatorUnregisterTypeNotRegisteredError(T, key);
     }
   }
 
-  /// Unregisters a specific instance.
+  /// Unregisters a specific instance. If this same instance was registered multiple
+  /// times, with different keys, then all of them will be unregistered.
   ///
   /// If you have registered a large quantity of items, this might not have good
   /// performance, as it will do a linear search for that instance.
@@ -70,7 +136,7 @@ class AutoServiceLocator {
     });
 
     if (entriesToRemove.isEmpty) {
-      throw ServiceLocatorTypeNotRegisteredError(instance.runtimeType, null);
+      throw ServiceLocatorUnregisterTypeNotRegisteredError(instance.runtimeType, null);
     }
 
     for (final entry in entriesToRemove) {
@@ -81,6 +147,18 @@ class AutoServiceLocator {
     }
   }
 
+  /// Returns a previously registered instance of a given type, with an optional key. The
+  /// instance being returned will be a singleton if it was registered to be a singleton,
+  /// or it will be a new instance, if it was registered to be created with a factory.
+  ///
+  /// The method returns a [Future] because it will always try to satisfy a dependency
+  /// chain, where the current type being requested, might depend on other types that are
+  /// still initializing in async factories. This allows you to register types in any
+  /// given order, and the [AutoServiceLocator] will take care of the initialization order
+  /// for you.
+  ///
+  /// Throws [ServiceLocatorTypeOrKeyNotFoundError] if the type or key were not found.
+  /// Throws [ServiceLocatorCircularDependencyError] if a circular dependency was detected.
   Future<T> get<T>({String? withKey}) async {
     // Due to Dart's generics limitations, we can only get a ServiceEntry<dynamic> and not ServiceEntry<T>
     final service = servicesMap[(T, withKey)];
@@ -96,11 +174,11 @@ class AutoServiceLocator {
 
     // Check for circular dependency (same call chain)
     if (resolutionStack.contains((T, withKey))) {
-      final chain = [...resolutionStack.map((entry) => entry.$1), T];
+      final chain = [...resolutionStack, (T, withKey)];
       throw ServiceLocatorCircularDependencyError(chain, withKey);
     }
 
-    // Wait for this instance, as it is already being initialised elsewhere
+    // Wait for this instance, as it is already being initialized elsewhere
     final pendingInitialization = pendingInitializations[(T, withKey)];
     if (pendingInitialization != null) {
       return await pendingInitialization.future as T;
@@ -154,6 +232,18 @@ class AutoServiceLocator {
     return true;
   }
 
+  /// Waits for all current pending initializations to complete.
+  ///
+  /// This might be useful if you only want to proceed in case you are sure all your
+  /// dependencies have been initialized and your application doesn't want to wait for
+  /// them when retrieving instances in later stages.
+  ///
+  /// Throws if any pending initialisation fails.
+  Future<void> waitPendingInitializations() async {
+    await Future.wait(pendingInitializations.entries.map((entry) => entry.value.future));
+  }
+
+  /// Resets the locator's internal caches. This should only be used for testing purposes.
   @visibleForTesting
   void reset() {
     servicesMap.clear();
@@ -188,15 +278,26 @@ class ServiceLocatorTypeAlreadyRegisteredError extends Error {
   }
 }
 
-class ServiceLocatorTypeNotRegisteredError implements Exception {
-  ServiceLocatorTypeNotRegisteredError(this.type, this.key);
+class ServiceLocatorUnregisterTypeNotRegisteredError implements Exception {
+  ServiceLocatorUnregisterTypeNotRegisteredError(this.type, this.key);
 
   final Type type;
   final String? key;
 
   @override
   String toString() {
-    return '${key != null ? 'The Key $key with ' : ''}Type $type is was not registered. Unregister expects the type to be already registered. Unregistering a type that was not already registered is likely a bug.';
+    return '${key != null ? 'The Key $key with ' : ''}Type $type was not registered. Unregister expects the type to be already registered. Unregistering a type that was not already registered is likely a bug.';
+  }
+}
+
+class ServiceLocatorUnregisterKeyNotRegisteredError implements Exception {
+  ServiceLocatorUnregisterKeyNotRegisteredError(this.key);
+
+  final String key;
+
+  @override
+  String toString() {
+    return 'The Key $key was not registered. Unregister expects the key to be already registered. Unregistering a key that was not already registered is likely a bug.';
   }
 }
 
@@ -215,12 +316,17 @@ class ServiceLocatorTypeOrKeyNotFoundError extends Error {
 class ServiceLocatorCircularDependencyError extends Error {
   ServiceLocatorCircularDependencyError(this.chain, this.key);
 
-  final List<Type> chain;
+  final List<(Type, String?)> chain;
   final String? key;
 
   @override
   String toString() {
-    return 'Circular dependency detected${key != null ? 'for Key $key' : ''}: ${chain.join(' -> ')}';
+    final chainString = chain
+        .map((entry) {
+          return entry.$2 != null ? '${entry.$1}(key: ${entry.$2})' : '${entry.$1}';
+        })
+        .join(' -> ');
+    return 'Circular dependency detected${key != null ? ' for Key $key' : ''}. Dependency resolution chain: $chainString';
   }
 }
 
@@ -232,6 +338,6 @@ class ServiceLocatorRegistrationOverrideException implements Exception {
 
   @override
   String toString() {
-    return '${key != null ? 'The Key $key with t' : 'T'}he type $type was registered again, but the old instance was still initialising, and the initialisation was aborted with this Exception.';
+    return '${key != null ? 'The Key $key with t' : 'T'}he type $type was registered again, but the old instance was still initializing, and the initialization was aborted with this Exception.';
   }
 }
