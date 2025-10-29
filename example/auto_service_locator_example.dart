@@ -11,7 +11,6 @@ void main() async {
   );
   // TODO(mfeinstein): [13/10/2025] Add exception for registering dynamic?
   locator.registerSingleton((get) async => get<B>(withKey: '2ndB'), withKey: '3rdB');
-  // TODO(mfeinstein): [29/10/2025] Add error for unique keys
   locator.registerSingleton((get) => 1, withKey: '3rdB');
 
   // final s = await locator.get<String>();

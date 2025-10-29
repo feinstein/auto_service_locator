@@ -10,17 +10,6 @@ class ServiceLocatorTypeAlreadyRegisteredError extends Error {
   }
 }
 
-class ServiceLocatorKeyAlreadyRegisteredError extends Error {
-  ServiceLocatorKeyAlreadyRegisteredError(this.key);
-
-  final String? key;
-
-  @override
-  String toString() {
-    return 'The Key $key is already registered. Unregister it before trying to register it again.';
-  }
-}
-
 class ServiceLocatorUnregisterTypeNotRegisteredError implements Exception {
   ServiceLocatorUnregisterTypeNotRegisteredError(this.type, this.key);
 
@@ -30,17 +19,6 @@ class ServiceLocatorUnregisterTypeNotRegisteredError implements Exception {
   @override
   String toString() {
     return '${key != null ? 'The Key $key with ' : ''}Type $type was not registered. Unregister expects the type to be already registered. Unregistering a type that was not already registered is likely a bug.';
-  }
-}
-
-class ServiceLocatorUnregisterKeyNotRegisteredError implements Exception {
-  ServiceLocatorUnregisterKeyNotRegisteredError(this.key);
-
-  final String key;
-
-  @override
-  String toString() {
-    return 'The Key $key was not registered. Unregister expects the key to be already registered. Unregistering a key that was not already registered is likely a bug.';
   }
 }
 

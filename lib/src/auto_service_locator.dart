@@ -1,17 +1,14 @@
 import 'dart:async';
 
-import 'package:auto_service_locator/auto_service_locator.dart';
+import 'package:auto_service_locator/src/exceptions.dart';
 import 'package:logging/logging.dart';
 import 'package:meta/meta.dart';
 
 class AutoServiceLocator {
   static final _logger = Logger('AutoServiceLocator');
 
-  // TODO(mfeinstein): Test null being registered
   @visibleForTesting
   Map<(Type, String?), ServiceEntry<dynamic>> servicesMap = {};
-
-  Set<String> keys = {};
 
   @visibleForTesting
   Map<(Type, String?), Completer<dynamic>> pendingInitializations = {};
@@ -63,7 +60,7 @@ class AutoServiceLocator {
   /// reassignments are unintentional and a source of hard to track bugs.
   ///
   /// If you need to register multiple factories for the same type, you can use
-  /// [withKey]. Keys are optional but must be unique.
+  /// [withKey]. Keys are optional but must be unique for the same type.
   /// If a type is registered with a key, then multiple factories for the same
   /// type [T] can be used, and the key is what will make them unique.
   ///
@@ -113,15 +110,6 @@ class AutoServiceLocator {
       throw ServiceLocatorTypeAlreadyRegisteredError(T, withKey);
     }
 
-    if (withKey != null) {
-      if (keys.contains(withKey)) {
-        maybeLog('Key $withKey is not unique');
-        throw ServiceLocatorKeyAlreadyRegisteredError(withKey);
-      }
-
-      keys.add(withKey);
-    }
-
     servicesMap[(T, withKey)] = ServiceEntry(factory: factory, isSingleton: isSingleton);
 
     // If there were any pending initializations for this type or key, we abort
@@ -155,8 +143,6 @@ class AutoServiceLocator {
       maybeLog('No entries were found to be unregistered ');
       throw ServiceLocatorUnregisterTypeNotRegisteredError(T, key);
     }
-
-    keys.remove(key);
   }
 
   /// Unregisters a specific instance. If this same instance was registered multiple
@@ -177,10 +163,6 @@ class AutoServiceLocator {
 
     for (final entry in entriesToRemove) {
       servicesMap.remove(entry.key);
-      final stringKey = entry.key.$2;
-      if (stringKey != null) {
-        keys.remove(stringKey);
-      }
 
       // If there were any pending initializations for this type or key, we abort
       // it with an exception.
@@ -299,7 +281,6 @@ class AutoServiceLocator {
     servicesMap.clear();
     pendingInitializations.clear();
     resolutionStack.clear();
-    keys.clear();
   }
 
   /// Only logs if logs are allowed with [shouldLog].
