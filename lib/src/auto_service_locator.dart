@@ -27,7 +27,7 @@ class AutoServiceLocator {
   /// Enables logging.
   ///
   /// Logging will be done using the `logging` package with the `FINE` log level.
-  /// This can be useful for investigating bugs in dependency initialisations, but most of
+  /// This can be useful for investigating bugs in dependency initializations, but most of
   /// the time will just add unnecessary logs, thus logging is off by default.
   bool shouldLog = false;
 
@@ -71,7 +71,10 @@ class AutoServiceLocator {
   /// Throws [ServiceLocatorTypeAlreadyRegisteredError] if the type or key is already
   /// registered and [isReassignmentAllowed] is `false`.
   /// {@endtemplate}
-  void registerSingleton<T>(Factory<T> singletonFactory, {String? withKey}) {
+  void registerSingleton<T extends Object>(
+    Factory<T> singletonFactory, {
+    String? withKey,
+  }) {
     maybeLog('Registering Singleton for type $T with key $withKey');
     _register(singletonFactory, isSingleton: true, withKey: withKey);
   }
@@ -97,12 +100,16 @@ class AutoServiceLocator {
   ///  ```
   ///
   /// {@macro register}
-  void registerFactory<T>(Factory<T> factory, {String? withKey}) {
+  void registerFactory<T extends Object>(Factory<T> factory, {String? withKey}) {
     maybeLog('Registering Factory for type $T with key $withKey');
     _register(factory, isSingleton: false, withKey: withKey);
   }
 
-  void _register<T>(Factory<T> factory, {required bool isSingleton, String? withKey}) {
+  void _register<T extends Object>(
+    Factory<T> factory, {
+    required bool isSingleton,
+    String? withKey,
+  }) {
     if (!isReassignmentAllowed && servicesMap.containsKey((T, withKey))) {
       maybeLog(
         'Type $T with key $withKey is already registered and reassignment is not allowed',
@@ -131,7 +138,7 @@ class AutoServiceLocator {
   }
 
   /// Unregisters a given type [T] with an optional [key].
-  void unregister<T>({String? key}) {
+  void unregister<T extends Object>({String? key}) {
     maybeLog('Unregistering Type $T with key $key');
     final removedEntry = servicesMap.remove((T, key));
 
@@ -248,7 +255,7 @@ class AutoServiceLocator {
   /// You can narrow down the result by providing a key using [withKey] to
   /// filter if the type was registered with that key, and a specific [instance]
   /// to check if that instance was registered for the Type and Key.
-  bool isRegistered<T>({String? withKey, Object? instance}) {
+  bool isRegistered<T extends Object>({String? withKey, Object? instance}) {
     maybeLog('Checking if type $T with key $withKey is registered');
     final service = servicesMap[(T, withKey)];
     if (service == null) {
@@ -268,7 +275,7 @@ class AutoServiceLocator {
   /// dependencies have been initialized and your application doesn't want to wait for
   /// them when retrieving instances in later stages.
   ///
-  /// Throws if any pending initialisation fails.
+  /// Throws if any pending initialization fails.
   Future<void> waitPendingInitializations() async {
     maybeLog('Waiting for any pending initializations');
     await Future.wait(pendingInitializations.entries.map((entry) => entry.value.future));
